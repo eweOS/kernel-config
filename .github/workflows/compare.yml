@@ -2,9 +2,12 @@ name: Compare Kernel Config
 
 on:
   pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - 'master'
 
 jobs:
-  bump:
+  genconfig:
     strategy:
       fail-fast: false
       matrix:
@@ -32,21 +35,65 @@ jobs:
           ref: linux
           path: pkg
       - run: >-
-          docker run --rm
-          -v ./pkg:/pkg -w /pkg
-          ghcr.io/eweos/docker:master
-          makepkg -o
-      - run: |
-          . pkg/PKGBUILD
-          ./repo/scripts/generate-config.sh ${{ matrix.arch }} ${{ matrix.karch }} pkg/$_basename-$pkgver repo
-          cp pkg/$_basename-$pkgver/.config config-new
-      - run: |
-          . pkg/PKGBUILD
-          ./repo/scripts/generate-config.sh ${{ matrix.arch }} ${{ matrix.karch }} pkg/$_basename-$pkgver repo-old
-          cp pkg/$_basename-$pkgver/.config config-old
-      - run: |
-          diff -urN config-old config-new > config.diff
+            docker run
+            --rm
+            -v $(pwd):/${{ github.workspace }}
+            -w ${{ github.workspace }}
+            ghcr.io/eweos/docker:buildenv
+            bash -c "
+            pushd pkg &&
+            pacman -Syu --noconfirm && makepkg -os --noconfirm &&
+            kdir=pkg/src/\$(source PKGBUILD && echo \$_basename-\$pkgver) &&
+            popd &&
+            repo/scripts/generate-config.sh ${{ matrix.arch }} ${{ matrix.karch }} \$kdir &&
+            cp \$kdir/.config config-new &&
+            repo-old/scripts/generate-config.sh ${{ matrix.arch }} ${{ matrix.karch }} \$kdir &&
+            cp \$kdir/.config config-old &&
+            diff -urN config-old config-new > config.diff || true
+            "
       - uses: actions/upload-artifact@v4
         with:
           name: diff-${{ matrix.arch }}
           path: config.diff
+
+  compare:
+    runs-on: ubuntu-latest
+    needs: [genconfig]
+    steps:
+      - uses: peter-evans/find-comment@v3
+        id: fc
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '## Config Compare'
+      - uses: actions/download-artifact@v4
+        with:
+          name: diff-x86_64
+          path: diff-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: diff-aarch64
+          path: diff-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: diff-riscv64
+          path: diff-riscv64
+      - uses: actions/download-artifact@v4
+        with:
+          name: diff-loongarch64
+          path: diff-loongarch64
+      - run: >-
+          echo "## Config Compare" >> diff.output &&
+          for outarch in x86_64 aarch64 riscv64 loongarch64; do
+          (echo "## $outarch" >> diff.output &&
+          echo '```diff' >> diff.output &&
+          echo "diff for $outarch" >> diff.output &&
+          cat diff-$outarch/config.diff >> diff.output &&
+          echo '```' >> diff.output);
+          done
+      - uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: diff.output
+          edit-mode: replace

@@ -21,8 +21,10 @@ for _conf in "$config_path"/*.config "$config_path/$carch"/*.config; do
 	cat "$_conf" >> "$mergedconfig"
 done
 
-cd "$ksrc"
+pushd "$ksrc"
 
 make LLVM=1 LLVM_IAS=1 ARCH="$karch" defconfig
 scripts/kconfig/merge_config.sh -m .config "$mergedconfig"
 make LLVM=1 LLVM_IAS=1 ARCH="$karch" olddefconfig
+
+popd
