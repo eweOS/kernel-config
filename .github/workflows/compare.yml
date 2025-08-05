@@ -1,0 +1,52 @@
+name: Compare Kernel Config
+
+on:
+  pull_request:
+
+jobs:
+  bump:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            karch: x86
+          - arch: aarch64
+            karch: arm64
+          - arch: riscv64
+            karch: riscv
+          - arch: loongarch64
+            karch: loongarch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          path: repo-old
+      - uses: actions/checkout@v4
+        with:
+          repository: eweOS/packages
+          ref: linux
+          path: pkg
+      - run: >-
+          docker run --rm
+          -v ./pkg:/pkg -w /pkg
+          ghcr.io/eweos/docker:master
+          makepkg -o
+      - run: |
+          . pkg/PKGBUILD
+          ./repo/scripts/generate-config.sh ${{ matrix.arch }} ${{ matrix.karch }} pkg/$_basename-$pkgver repo
+          cp pkg/$_basename-$pkgver/.config config-new
+      - run: |
+          . pkg/PKGBUILD
+          ./repo/scripts/generate-config.sh ${{ matrix.arch }} ${{ matrix.karch }} pkg/$_basename-$pkgver repo-old
+          cp pkg/$_basename-$pkgver/.config config-old
+      - run: |
+          diff -urN config-old config-new > config.diff
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diff-${{ matrix.arch }}
+          path: config.diff
