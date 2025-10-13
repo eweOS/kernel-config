@@ -94,12 +94,20 @@ jobs:
           cat diff-$outarch/config.diff >> diff.output &&
           echo '```' >> diff.output);
           done
+      - run: >-
+          cat diff.output
       - uses: tibdex/github-app-token@v2.1.0
+        if: env.KEY
+        env:
+          KEY: ${{ secrets.GH_APP_PRIVKEY }}
         id: gettoken
         with:
           app_id: 337143
           private_key: ${{ secrets.GH_APP_PRIVKEY }}
       - uses: peter-evans/create-or-update-comment@v4
+        if: env.KEY
+        env:
+          KEY: ${{ secrets.GH_APP_PRIVKEY }}
         with:
           token: ${{ steps.gettoken.outputs.token }}
           comment-id: ${{ steps.fc.outputs.comment-id }}
